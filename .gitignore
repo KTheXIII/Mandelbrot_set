@@ -2,6 +2,8 @@
 **/bin
 **/obj
 
+*.out
+
 # Generated Files
 mandelbrot.ppm
 mandelbrot.png
@@ -25,3 +27,6 @@ Makefile
 
 # Visual Studio Code
 .vscode
+
+.DS_Store
+

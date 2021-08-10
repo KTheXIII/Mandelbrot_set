@@ -2,10 +2,6 @@
 
 Basic image generation using [stb](https://github.com/nothings/stb) image loader/writer.
 
-## Sample image
-
-![Mandelbrot set in color](/res/mandelbrot_set.png)
-
 ## Requirements
 
   - [premake5](https://github.com/premake/premake-core)
