@@ -4,7 +4,13 @@ Basic image generation using [stb](https://github.com/nothings/stb) image loader
 
 ## Requirements
 
-  - [premake5](https://github.com/premake/premake-core)
+  - C++17
+
+## Compile
+
+```
+clang++ -std=c++17 -O3 -o mandelbrot ./mandelbrot.cpp
+```
 
 ## Math
 

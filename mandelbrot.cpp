@@ -3,9 +3,10 @@
 #include <vector>
 #include <string>
 #include <chrono>
-#include <algorithm>
 #include <thread>
 #include <type_traits>
+#include <stdexcept>
+#include <algorithm>
 
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -19,8 +20,16 @@ auto mandelbrot(std::complex<double> z, std::complex<double> c) {
     return z * z + c;
 }
 
+// TODO: Burning ship fractal
+//       z_{n+1} = (|Re(z_n)| + i|Im(z_n)|)^2 + c, z_0 = 0
+//       https://en.wikipedia.org/wiki/Burning_Ship_fractal
+// TODO: Make tricorn implementation with degree of freedom calculation
+//       f(z) = z^d + c, where d is can change
+//       https://en.wikipedia.org/wiki/Tricorn_%28mathematics%29
+// TODO: Better color generation
+
 int32_t iterate(std::complex<double> z, std::complex<double> c,
-                int32_t max, double radius = 2.0) {
+                int32_t max, double degree = 4, double radius = 2.0) {
     int32_t current = 0;  // Current Iteration
     auto r2 = radius * radius;
 
@@ -39,156 +48,263 @@ T map(T x, T in_min, T in_max, T out_min, T out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+uint8_t compute_color(float c, float scale, float freq = 12.f) {
+    return uint8_t((std::sin(scale * freq * c - M_PI / 2.f) + 1.f) * 0.5f *
+                   255.f);
+}
+
 template <typename T>
 struct vec2 {
     T x;
     T y;
 };
 
-struct Settings {
+struct Config {
     vec2<double> center{0., 0.};
-    double scale = 1.75;
-    int32_t width = 512;
-    int32_t height = 512;
-    int32_t iterations = 512;
+    double  scale  = 1.75;
+    int32_t width  = 1024;
+    int32_t height = 1024;
+    int32_t iteration = 512;
 };
 
-uint8_t compute_color(float c, float scale, float freq = 12.f) {
-    return uint8_t((std::sin(scale * freq * c - M_PI / 2.f) + 1.f) * 0.5f *
-                   255.f);
+struct Flags {
+    std::string filename = "mandelbrot.png";
+    int32_t recursion  = 3;
+    bool multithread = true;
+    bool write = true;
+};
+
+std::ostream& operator<<(std::ostream& os, Config const& config) {
+    os << "Config:\n";
+    os << "  size:       " << config.width << "x" << config.height << '\n';
+    os << "  scale:      " << config.scale << '\n';
+    os << "  iterations: " << config.iteration << '\n';
+    os << "  position:   " << config.center.x << "," << config.center.y << '\n';
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, Flags const& flags) {
+    os << "Flags:\n";
+    os << "  recursion:     " << flags.recursion << '\n';
+    os << "  multithreaded: " << (flags.multithread ? "true" : "false") << '\n';
+    os << "  write:         " << (flags.write ? "true" : "false") << '\n';
+    return os;
 }
 
 constexpr auto USAGE = R"(
-    Usage:  mandelbrot [width] [height]
+Usage: mandelbrot [options] [filename]
 
-    Options:
-            [width]     Width of the mandelbrot image
-            [height]    Height of the mandelbrot image
+Options:
+    [filename]          specify the output filename
+
+    -h, --help          show list of command-line options
+    -d, --dimension     set image size, width and height
+                        example: -s 512,     will result in 512x512
+                                 -s 480 360, will result in 480x360
+    -i, --iteration     set maximum iterations
+    -p, --position      set position
+                        example: -p 0.1 0.5
+    -s, --scale         set zoom scale
+
+    --multithreaded     set flag for multithreading
+    --singlethreaded    set flag for singlethreaded
+    -r, --recursion     set maximum multithreaded recursion partition
+    --no-output         don't output the image
 )";
 
-int32_t main(int32_t argc, char const* argv[]) {
-    std::vector<std::string> args(argv, argv + argc);
-    constexpr auto channels = 3;
-    Settings settings;
+void parse_args(Flags& flags, Config& config,
+                std::vector<std::string>& args) {
+    for(int32_t i = 0; i < args.size(); i++) {
+        auto curr = args.at(i);
+        if (curr == "-h" || curr == "--help") {
+            std::cout << USAGE << '\n';
+            std::exit(0);
+        }
 
-    if (argc == 2) {
+        if (curr == "-d" || curr == "--dimension") {
+            auto width = i < args.size() - 1 ? args.at(++i) : "";
+            if (width.empty()) {
+                std::cerr << "flag -d is not in correct format, example: -d 512\n";
+                std::exit(1);
+            }
+            auto height = i < args.size() - 1 ? args.at(i + 1) : width;
+            if (height.at(0) == '-') height = width;
+            else i++;
+
+            try {
+                config.width  = std::stoi(width);
+                config.height = std::stoi(height);
+                continue;
+            } catch(std::invalid_argument const& e) {
+                std::cerr << "error in flag -d: " << e.what() << '\n';
+                std::exit(1);
+            }
+        }
+
+        if (curr == "-i" || curr == "--iteration") {
+            auto iteration = i < args.size() - 1 ? args.at(++i) : "";
+            if (iteration.empty()) {
+                std::cerr << "flag -i is not in correct format, example: -i 256\n";
+                std::exit(1);
+            }
+
+            try {
+                config.iteration = std::stoi(iteration);
+                continue;
+            } catch(std::invalid_argument const& e) {
+                std::cerr << "error in flag -i: " << e.what() << '\n';
+                std::exit(1);
+            }
+        }
+
+        if (curr == "-p" || curr == "--position") {
+            auto x = i < args.size() - 1 ? args.at(++i) : "";
+            auto y = i < args.size() - 1 ? args.at(++i) : "";
+
+            if (x.empty() || y.empty()) {
+                std::cerr << "flag -p is not in correct format, example: -p 0.1 0.5\n";
+                std::exit(1);
+            }
+
+            try {
+                config.center.x = std::stod(x);
+                config.center.y = std::stod(y);
+            } catch(std::invalid_argument const& e) {
+                std::cerr << "error in flag -p: " << e.what() << '\n';
+                std::exit(1);
+            }
+        }
+
+        if (curr == "-s" || curr == "--scale") {
+            auto scale = i < args.size() - 1 ? args.at(++i) : "";
+            if (scale.empty()) {
+                std::cerr << "flag -s is not in correct format, example: -s 2.0\n";
+                std::exit(1);
+            }
+
+            try {
+                config.scale = std::stod(scale);
+            } catch(std::invalid_argument const& e) {
+                std::cerr << "error in flag -s: " << e.what() << '\n';
+                std::exit(1);
+            }
+        }
+
+        if (curr == "-r" || curr == "--recursion") {
+            auto recursion = i < args.size() - 1 ? args.at(++i) : "";
+            if (recursion.empty()) {
+                std::cerr << "flag -r is not in correct format, example: -r 3\n";
+                std::exit(1);
+            }
+
+            try {
+                flags.recursion = std::stoi(recursion);
+                if (flags.recursion < 0)
+                    throw std::runtime_error("negative recursion depth is not allowed");
+            } catch(std::exception const& e) {
+                std::cerr << "error in flag -r: " << e.what() << '\n';
+                std::exit(1);
+            }
+        }
+
+        if (curr == "--multithreaded") flags.multithread = true;
+        if (curr == "--singlethreaded") flags.multithread = false;
+        if (curr == "--no-output") flags.write = false;
+
+        if (curr.at(0) != '-') {
+            flags.filename = curr;
+        }
+    }
+
+    if (args.size() == 1) {
         std::cout << USAGE;
         std::exit(0);
     }
+}
 
-    if (argc >= 3) {
-        try {
-            settings.width = std::stoi(args[1]);
-            settings.height = std::stoi(args[2]);
-        } catch (std::exception const& e) {
-            std::cerr << e.what() << '\n';
-        }
-    }
+int32_t main(int32_t argc, char const* argv[]) {
+    std::vector<std::string> args(argv, argv + argc);
+    Flags flags;
+    Config config;
+    parse_args(flags, config, args);
 
-    if (argc >= 4) {
-        try {
-            settings.iterations = std::stoi(args[3]);
-        } catch (std::exception const& e) {
-            std::cerr << e.what() << '\n';
-        }
-    }
+    std::cout << config << '\n';
+    std::cout << flags << '\n';
 
-    if (argc >= 7) {
-        try {
-            settings.center.x = std::stod(args[4]);
-            settings.center.y = std::stod(args[5]);
-            settings.scale = std::stod(args[6]);
-        } catch (std::exception const& e) {
-            std::cerr << e.what() << '\n';
-        }
-    }
-
-    auto size = settings.width * settings.height;
-
-    std::cout << "Allocating memory...\n";
-    std::cout << "Fractals:  " << (size * sizeof(int32_t)) << " bytes\n";
-    std::cout << "Image:     " << (size * sizeof(int8_t) * channels)
-              << " bytes\n\n";
-
-    std::chrono::duration<double> elapsed;
-    auto start = std::chrono::high_resolution_clock::now();
-    auto end = std::chrono::high_resolution_clock::now();
-
-    auto fractals = new int32_t[size];
-    // std::vector<vec2<double>> positions;
-    auto image = new uint8_t[size * channels];
-
-    // for (int32_t i = 0; i < settings.height; i++) {
-    //    double y = map<double>(i + 1, 1.0, settings.height, 1.0, -1.0);
-    //    for (int32_t j = 0; j < settings.width; j++) {
-    //        double x = map<double>(j + 1, 1.0, settings.width, -1.0, 1.0);
-    //        positions.push_back({x, y});
-    //    }
-    //}
-
-    const auto threadCount = int32_t(std::thread::hardware_concurrency());
-    std::cout << "Thread count: " << threadCount << '\n';
-    std::vector<std::thread> threads;
+    auto fractals = new int32_t[config.width * config.height];
 
     auto compute = [&](int32_t startr, int32_t endr, int32_t startc,
                        int32_t endc) {
-        auto scale  = settings.scale;
-        auto center = settings.center;
+        auto scale  = config.scale;
+        auto center = config.center;
+        auto ratio  = double(config.width)/double(config.height);
         for (int32_t i = startr; i < endr; i++) {
-            double y = map<double>(i + 1, 1.0, settings.height, 1.0, -1.0);
+            double y = map<double>(i + 1, 1.0, config.height, 1.0, -1.0);
             for (int32_t j = startc; j < endc; j++) {
-                double x = map<double>(j + 1, 1.0, settings.width, -1.0, 1.0);
+                double x = map<double>(j + 1, 1.0, config.width, -1.0, 1.0);
                 std::complex<double> z{0., 0.};
-                std::complex<double> c{x * scale + center.x, y * scale + center.y};
-                fractals[i * settings.width + j] = iterate(z, c, settings.iterations);
+                std::complex<double> c{(x * scale + center.x) * ratio, (y * scale + center.y)};
+                fractals[i * config.width + j] = iterate(z, c, config.iteration);
             }
         }
     };
 
     std::cout << "Computing fractal....\n";
-    start = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::high_resolution_clock::now();
 
-    const auto offset = settings.width / threadCount;
-    for (int32_t i = 0; i < threadCount; i++) {
-        threads.emplace_back(compute, 0, settings.height, offset * i,
-                             offset * (i + 1));
+    if (flags.multithread) {
+        const auto n_threads = std::thread::hardware_concurrency();
+        std::cout << "Thread count: " << n_threads << '\n';
+        std::vector<std::thread> threads;
+        start = std::chrono::high_resolution_clock::now();
+
+        const auto offset = config.height / int32_t(n_threads);
+        for (int32_t i = 0; i < int32_t(n_threads); i++) {
+            threads.emplace_back(compute, offset * i, offset * (i + 1), 0, config.width);
+        }
+        for (auto& thread : threads)
+            thread.join();
+    } else {
+        compute(0, config.height, 0, config.width);
     }
-
-    for (auto& thread : threads) thread.join();
-
-    end = std::chrono::high_resolution_clock::now();
-    elapsed = end - start;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
     std::cout << "Time took: " << elapsed.count() << " s\n";
 
-    std::cout << "Generating image...\n";
-    start = std::chrono::high_resolution_clock::now();
-    int32_t index = 0;
-    for (int32_t i = 0; i < settings.height; i++) {
-        for (int32_t j = 0; j < settings.width; j++) {
-            auto n = fractals[i * settings.width + j];
-            if (n < settings.iterations) {
-                auto color = std::sqrt(float(n) / float(settings.iterations));
-                image[index++] = compute_color(color, .3f);
-                image[index++] = compute_color(color, .1f);
-                image[index++] = compute_color(color, .5f);
-            } else {
-                image[index++] = 0;
-                image[index++] = 0;
-                image[index++] = 0;
+    if (flags.write) {
+        std::cout << "Generating image...\n";
+        start = std::chrono::high_resolution_clock::now();
+        auto image = new uint8_t[config.width * config.height * 3];
+
+        int32_t index = 0;
+        for (int32_t i = 0; i < config.height; i++) {
+            for (int32_t j = 0; j < config.width; j++) {
+                const auto n = fractals[i * config.width + j];
+                if (n < config.iteration) {
+                    auto color = std::sqrt(float(n) / float(config.iteration));
+                    image[index++] = compute_color(color, .3f);
+                    image[index++] = compute_color(color, .1f);
+                    image[index++] = compute_color(color, .5f);
+                } else {
+                    image[index++] = 0;
+                    image[index++] = 0;
+                    image[index++] = 0;
+                }
             }
         }
+
+        stbi_write_png(flags.filename.c_str(), config.width, config.height, 3,
+                       image, config.width * 3);
+
+        end = std::chrono::high_resolution_clock::now();
+        elapsed = end - start;
+        std::cout << "Time took: " << elapsed.count() << " s\n";
+
+        delete[] image;
     }
-    end = std::chrono::high_resolution_clock::now();
-    elapsed = end - start;
-    std::cout << "Time took: " << elapsed.count() << " s\n";
 
-    stbi_write_png("mandelbrot.png", settings.width, settings.height, channels,
-                   image, settings.width * channels);
-
-    std::cout << "Cleaning up...\n";
-    delete[] image;
+    // Memory cleanup
     delete[] fractals;
-    std::cout << "Done...\n";
 
     return 0;
 }
