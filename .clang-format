@@ -1,13 +1,27 @@
-BasedOnStyle: Google
+# Select style to base on.
+BasedOnStyle: LLVM
+
+# Always used 4 spaces and always use spaces.
 IndentWidth: 4
 TabWidth: 4
-SortIncludes: false
-CompactNamespaces: true
-NamespaceIndentation: All
-AllowAllConstructorInitializersOnNextLine: true
+UseTab: Never
+ContinuationIndentWidth: 4
+UseCRLF: false
+
+# Comment style
 AlignTrailingComments: true
-AllowAllArgumentsOnNextLine: true
-PointerAlignment: Right
-AllowShortBlocksOnASingleLine: Empty
-AllowShortFunctionsOnASingleLine: Empty
-AllowShortLoopsOnASingleLine: true
+
+# C++
+Language: Cpp
+SortIncludes: false
+
+# Pointer and reference side
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Same line
+AllowShortIfStatementsOnASingleLine: Always
+AllowShortFunctionsOnASingleLine: All
+
+# Alignments
+AlignConsecutiveAssignments: Consecutive

@@ -3,6 +3,8 @@
 **/obj
 
 *.out
+*.exe
+*.png
 
 # Generated Files
 mandelbrot.ppm
