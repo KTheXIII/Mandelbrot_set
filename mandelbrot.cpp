@@ -86,7 +86,8 @@ std::ostream& operator<<(std::ostream& os, Flags const& flags) {
     return os;
 }
 
-template <typename T> class Image {
+template <typename T>
+class Image {
   public:
     Image(int32_t const width, int32_t const height, int32_t const channels = 3)
         : m_Width(width), m_Height(height), m_Channels(channels) {
@@ -281,14 +282,14 @@ int32_t main(int32_t argc, char const* argv[]) {
 
     auto compute = [&](int32_t startr, int32_t endr, int32_t startc,
                        int32_t endc) {
-        auto scale = config.scale;
-        auto ratio = double(config.width) / double(config.height);
+        const auto scale = config.scale;
+        const auto ratio = double(config.width) / double(config.height);
         for (int32_t i = startr; i < endr; i++) {
             double y = map<double>(i + 1, 1.0, config.height, 1.0, -1.0);
             for (int32_t j = startc; j < endc; j++) {
                 double x = map<double>(j + 1, 1.0, config.width, -1.0, 1.0);
                 std::complex<double> z{0., 0.};
-                std::complex<double> c{(x * scale + config.x) * ratio,
+                std::complex<double> c{(x * scale * ratio + config.x),
                                        (y * scale + config.y)};
                 fractals[i * config.width + j] =
                     iterate(z, c, config.iteration);
@@ -353,3 +354,4 @@ int32_t main(int32_t argc, char const* argv[]) {
 
     return 0;
 }
+

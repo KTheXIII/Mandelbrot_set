@@ -22,6 +22,7 @@ PointerAlignment: Left
 # Same line
 AllowShortIfStatementsOnASingleLine: Always
 AllowShortFunctionsOnASingleLine: All
+AlwaysBreakTemplateDeclarations: Yes
 
 # Alignments
 AlignConsecutiveAssignments: Consecutive
